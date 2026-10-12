@@ -1,5 +1,6 @@
 fastapi==0.111.0
 pydantic==2.7.4
+google-generativeai>=0.7.0
 elevenlabs>=1.0.0
 python-multipart==0.0.9
 pypdf==4.2.0
