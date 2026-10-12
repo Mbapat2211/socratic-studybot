@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
-import { Trash2, FileText, Send, Layers, Zap } from "lucide-react";
+import React, { useState, useRef } from "react";
 
 interface WorkspaceFile {
   id: string;
@@ -18,25 +17,29 @@ interface SocraticResponse {
 
 export default function WorkspacePage() {
   const [studentQuery, setStudentQuery] = useState("");
-  const [files, setFiles] = useState<WorkspaceFile[]>([
-    {
-      id: "1",
-      filename: "Midsummer_Act_3.txt",
-      text: "PUCK: My mistress with a monster is in love. Near to her close and consecrated bower, While she was in her dull and sleeping hour...",
-      enabled: true,
-    },
-  ]);
+  const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [response, setResponse] = useState<SocraticResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const addMockFile = () => {
-    const newFile: WorkspaceFile = {
-      id: Date.now().toString(),
-      filename: `Lecture_Notes_Unit_${files.length + 1}.txt`,
-      text: "Renaissance drama, meter vs prose, trochaic tetrameter used for supernatural characters like Puck.",
-      enabled: true,
-    };
-    setFiles([...files, newFile]);
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const uploaded = e.target.files;
+    if (!uploaded) return;
+
+    for (const file of Array.from(uploaded)) {
+      const text = await file.text();
+      setFiles((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString() + Math.random(),
+          filename: file.name,
+          text,
+          enabled: true,
+        },
+      ]);
+    }
+    // Reset input so same file can be re-uploaded if needed
+    e.target.value = "";
   };
 
   const toggleFile = (id: string) => {
@@ -79,48 +82,80 @@ export default function WorkspacePage() {
   };
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-100">
-      <aside className="w-80 border-r border-slate-800 bg-slate-900 p-4 flex flex-col justify-between">
+    <div style={{ display: "flex", height: "100vh", backgroundColor: "#020817", color: "#f8fafc", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+
+      {/* SIDEBAR */}
+      <aside style={{ width: "300px", borderRight: "1px solid #1e293b", backgroundColor: "#0f172a", padding: "24px 16px", display: "flex", flexDirection: "column", justifyContent: "space-between", flexShrink: 0 }}>
         <div>
-          <div className="flex items-center gap-2 mb-6">
-            <Layers className="text-blue-400" />
-            <h1 className="font-bold text-lg">Study Workspace</h1>
+          {/* Title */}
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "24px" }}>
+            <span style={{ fontSize: "20px" }}>⚡</span>
+            <h1 style={{ fontWeight: "700", fontSize: "16px", margin: 0 }}>Study Workspace</h1>
           </div>
 
-          <div className="flex items-center gap-2 px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg mb-6">
-            <Zap className="w-4 h-4 text-yellow-400 flex-shrink-0" />
+          {/* Provider badge */}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "8px", marginBottom: "24px" }}>
+            <span style={{ fontSize: "18px" }}>⚡</span>
             <div>
-              <p className="text-xs font-semibold text-slate-200">ElevenLabs</p>
-              <p className="text-xs text-slate-400">Conversational AI · Text-only mode</p>
+              <p style={{ margin: 0, fontSize: "12px", fontWeight: "600", color: "#fbbf24" }}>ElevenLabs</p>
+              <p style={{ margin: 0, fontSize: "11px", color: "#94a3b8" }}>Conversational AI · Text-only</p>
             </div>
           </div>
 
-          <div>
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-xs font-semibold text-slate-400 uppercase">Attached Context</span>
-              <button onClick={addMockFile} className="text-xs text-blue-400 hover:underline">
-                + Add File
+          {/* File Upload */}
+          <div style={{ marginBottom: "16px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+              <span style={{ fontSize: "11px", fontWeight: "600", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Attached Context
+              </span>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                style={{ fontSize: "12px", color: "#60a5fa", background: "none", border: "none", cursor: "pointer", padding: "2px 6px", borderRadius: "4px" }}
+              >
+                + Upload File
               </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".txt,.md,.pdf,.csv,.json"
+                onChange={handleFileUpload}
+                style={{ display: "none" }}
+              />
             </div>
 
-            <div className="space-y-2 max-h-64 overflow-y-auto">
+            {files.length === 0 && (
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                style={{ border: "2px dashed #334155", borderRadius: "8px", padding: "20px", textAlign: "center", cursor: "pointer", color: "#475569", fontSize: "12px" }}
+              >
+                <div style={{ fontSize: "24px", marginBottom: "6px" }}>📄</div>
+                Click to upload .txt, .md, .pdf files
+              </div>
+            )}
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "300px", overflowY: "auto" }}>
               {files.map((file) => (
                 <div
                   key={file.id}
-                  className="flex items-center justify-between p-2 bg-slate-800 rounded border border-slate-700 text-xs"
+                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px", backgroundColor: "#1e293b", borderRadius: "6px", border: "1px solid #334155", fontSize: "12px" }}
                 >
-                  <div className="flex items-center gap-2 overflow-hidden">
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", overflow: "hidden" }}>
                     <input
                       type="checkbox"
                       checked={file.enabled}
                       onChange={() => toggleFile(file.id)}
-                      className="rounded accent-blue-500"
+                      style={{ accentColor: "#3b82f6", flexShrink: 0 }}
                     />
-                    <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                    <span className="truncate">{file.filename}</span>
+                    <span style={{ fontSize: "14px" }}>📄</span>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#cbd5e1" }}>{file.filename}</span>
                   </div>
-                  <button onClick={() => deleteFile(file.id)} className="text-slate-500 hover:text-red-400">
-                    <Trash2 className="w-3.5 h-3.5" />
+                  <button
+                    onClick={() => deleteFile(file.id)}
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "#475569", fontSize: "16px", flexShrink: 0, padding: "0 2px" }}
+                    title="Remove file"
+                  >
+                    ✕
                   </button>
                 </div>
               ))}
@@ -128,62 +163,71 @@ export default function WorkspacePage() {
           </div>
         </div>
 
-        <div className="text-xs text-slate-500 border-t border-slate-800 pt-3">
-          Active Context Cache:{" "}
-          <span className="text-emerald-400">{files.filter((f) => f.enabled).length} Files</span>
+        {/* Footer */}
+        <div style={{ fontSize: "11px", color: "#475569", borderTop: "1px solid #1e293b", paddingTop: "12px" }}>
+          Active Context:{" "}
+          <span style={{ color: "#34d399" }}>{files.filter((f) => f.enabled).length} file(s)</span>
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col justify-between p-8">
-        <div className="max-w-3xl w-full mx-auto space-y-6">
-          <header className="border-b border-slate-800 pb-4">
-            <h2 className="text-xl font-bold text-slate-100">Socratic Cognitive Tutor</h2>
-            <p className="text-sm text-slate-400">
-              Direct answers are restricted. Guidance targets offline execution.
-            </p>
-          </header>
+      {/* MAIN */}
+      <main style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "32px", overflowY: "auto" }}>
+        <div style={{ maxWidth: "720px", width: "100%", margin: "0 auto" }}>
+          <div style={{ borderBottom: "1px solid #1e293b", paddingBottom: "16px", marginBottom: "24px" }}>
+            <h2 style={{ fontSize: "20px", fontWeight: "700", margin: "0 0 4px 0" }}>Socratic Cognitive Tutor</h2>
+            <p style={{ fontSize: "13px", color: "#64748b", margin: 0 }}>Direct answers are restricted. Guidance targets offline execution.</p>
+          </div>
+
+          {!response && !loading && (
+            <div style={{ textAlign: "center", color: "#334155", marginTop: "80px" }}>
+              <div style={{ fontSize: "48px", marginBottom: "12px" }}>🎓</div>
+              <p style={{ fontSize: "14px" }}>Upload your study materials and ask a question to get Socratic guidance.</p>
+            </div>
+          )}
+
+          {loading && (
+            <div style={{ textAlign: "center", color: "#64748b", marginTop: "80px" }}>
+              <div style={{ fontSize: "32px", marginBottom: "12px" }}>⏳</div>
+              <p>Generating scaffold...</p>
+            </div>
+          )}
 
           {response && (
-            <div className="space-y-4">
-              <div className="p-4 bg-slate-900 border-l-4 border-blue-500 rounded-r shadow-md">
-                <h3 className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-1">
-                  1. Textual Focus
-                </h3>
-                <p className="text-sm text-slate-200">{response.textual_focus}</p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div style={{ padding: "16px", backgroundColor: "#0f172a", borderLeft: "4px solid #3b82f6", borderRadius: "0 8px 8px 0", boxShadow: "0 2px 8px rgba(0,0,0,0.3)" }}>
+                <h3 style={{ fontSize: "11px", fontWeight: "700", color: "#60a5fa", textTransform: "uppercase", letterSpacing: "0.1em", margin: "0 0 8px 0" }}>1. Textual Focus</h3>
+                <p style={{ fontSize: "14px", color: "#e2e8f0", margin: 0, lineHeight: "1.6" }}>{response.textual_focus}</p>
               </div>
 
-              <div className="p-4 bg-slate-900 border-l-4 border-purple-500 rounded-r shadow-md">
-                <h3 className="text-xs font-bold text-purple-400 uppercase tracking-wider mb-1">
-                  2. Thinking Framework
-                </h3>
-                <p className="text-sm text-slate-200">{response.thinking_framework}</p>
+              <div style={{ padding: "16px", backgroundColor: "#0f172a", borderLeft: "4px solid #a855f7", borderRadius: "0 8px 8px 0", boxShadow: "0 2px 8px rgba(0,0,0,0.3)" }}>
+                <h3 style={{ fontSize: "11px", fontWeight: "700", color: "#c084fc", textTransform: "uppercase", letterSpacing: "0.1em", margin: "0 0 8px 0" }}>2. Thinking Framework</h3>
+                <p style={{ fontSize: "14px", color: "#e2e8f0", margin: 0, lineHeight: "1.6" }}>{response.thinking_framework}</p>
               </div>
 
-              <div className="p-4 bg-slate-900 border-l-4 border-emerald-500 rounded-r shadow-md">
-                <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider mb-1">
-                  3. Offline Notebook Task
-                </h3>
-                <p className="text-sm text-slate-200 font-semibold">{response.offline_exercise}</p>
+              <div style={{ padding: "16px", backgroundColor: "#0f172a", borderLeft: "4px solid #10b981", borderRadius: "0 8px 8px 0", boxShadow: "0 2px 8px rgba(0,0,0,0.3)" }}>
+                <h3 style={{ fontSize: "11px", fontWeight: "700", color: "#34d399", textTransform: "uppercase", letterSpacing: "0.1em", margin: "0 0 8px 0" }}>3. Offline Notebook Task</h3>
+                <p style={{ fontSize: "14px", color: "#e2e8f0", margin: 0, lineHeight: "1.6", fontWeight: "600" }}>{response.offline_exercise}</p>
               </div>
             </div>
           )}
         </div>
 
-        <div className="max-w-3xl w-full mx-auto">
-          <form onSubmit={handleSubmit} className="flex gap-2">
+        {/* Input */}
+        <div style={{ maxWidth: "720px", width: "100%", margin: "24px auto 0" }}>
+          <form onSubmit={handleSubmit} style={{ display: "flex", gap: "8px" }}>
             <input
               type="text"
               placeholder="Ask a question about the active materials..."
               value={studentQuery}
               onChange={(e) => setStudentQuery(e.target.value)}
-              className="flex-1 bg-slate-800 border border-slate-700 rounded-lg p-3 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+              style={{ flex: 1, backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "8px", padding: "12px 16px", fontSize: "14px", color: "#f1f5f9", outline: "none" }}
             />
             <button
               type="submit"
               disabled={loading}
-              className="bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-semibold px-5 py-3 rounded-lg text-sm flex items-center gap-2 disabled:opacity-50 transition-colors"
+              style={{ backgroundColor: loading ? "#78350f" : "#f59e0b", color: "#0f172a", fontWeight: "700", padding: "12px 24px", borderRadius: "8px", fontSize: "14px", border: "none", cursor: loading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: "6px", opacity: loading ? 0.6 : 1 }}
             >
-              {loading ? "Scaffolding..." : <><Send className="w-4 h-4" /> Ask</>}
+              {loading ? "⏳ Thinking..." : "➤ Ask"}
             </button>
           </form>
         </div>
