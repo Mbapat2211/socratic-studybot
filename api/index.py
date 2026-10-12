@@ -10,7 +10,7 @@ from elevenlabs.conversational_ai.conversation import Conversation, Conversation
 app = FastAPI()
 
 # ── Put your ElevenLabs API key here ──────────────────────────────────────────
-ELEVENLABS_API_KEY = "sk_your_key_here"
+ELEVENLABS_API_KEY = "51586c01ab220c7418772b0a37d741c88c0d528b16843155a5ac5d3686dc5407"
 # ──────────────────────────────────────────────────────────────────────────────
 
 # v2.0 Anti-Loop Socratic System Guardrail
