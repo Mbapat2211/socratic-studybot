@@ -13,7 +13,6 @@ app = FastAPI()
 ELEVENLABS_API_KEY = "sk_08efe8dccd60244bbf6c9e69ff1f9eb72d91308f7f758a1c"
 # ──────────────────────────────────────────────────────────────────────────────
 
-# v2.0 Anti-Loop Socratic System Guardrail
 SYSTEM_GUARDRAIL = """
 You are a universal cognitive scaffolding engine. Your sole objective is to train students in domain-specific problem-solving strategies, encouraging self-directed thought and minimizing AI reliance.
 Never solve the problem, complete calculations, write code/essays, or provide follow-up prompts for the user to type back into an LLM.
@@ -39,7 +38,6 @@ class SocraticRequest(BaseModel):
 
 @app.post("/api/scaffold")
 async def generate_scaffold(req: SocraticRequest):
-    # 1. Dynamically rebuild context from active/enabled files (sorted by ID for stable prefix caching)
     active_files = [f for f in req.workspace_files if f.enabled]
     active_files.sort(key=lambda x: x.id)
 
@@ -52,14 +50,12 @@ async def generate_scaffold(req: SocraticRequest):
     try:
         client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
 
-        # 2. Create a temporary text-only agent with the Socratic guardrail baked in
         agent_response = client.conversational_ai.agents.create(
             conversation_config={
                 "agent": {
                     "prompt": {
                         "prompt": SYSTEM_GUARDRAIL,
                     },
-                    "first_message": None,
                     "language": "en",
                 },
                 "conversation": {
@@ -70,7 +66,6 @@ async def generate_scaffold(req: SocraticRequest):
         agent_id = agent_response.agent_id
 
         try:
-            # 3. Run a text-only conversation session
             result_holder = {}
 
             def on_agent_response(text: str):
@@ -93,7 +88,6 @@ async def generate_scaffold(req: SocraticRequest):
             conversation.start_session()
             conversation.send_user_message(user_payload)
 
-            # Wait for the agent response to arrive
             await asyncio.sleep(5)
             conversation.end_session()
 
@@ -101,7 +95,6 @@ async def generate_scaffold(req: SocraticRequest):
             if not raw_text:
                 raise HTTPException(status_code=500, detail="No response received from ElevenLabs agent.")
 
-            # 4. Strip any markdown fences and parse JSON
             clean = raw_text.strip()
             if clean.startswith("```"):
                 clean = clean.split("```")[1]
@@ -112,7 +105,6 @@ async def generate_scaffold(req: SocraticRequest):
             return json.loads(clean)
 
         finally:
-            # 5. Clean up the ephemeral agent
             try:
                 client.conversational_ai.agents.delete(agent_id=agent_id)
             except Exception:
