@@ -1,16 +1,20 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import List
 import json
 import os
+import re
+from typing import List
 
-import google.generativeai as genai
+import httpx
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
 app = FastAPI()
 
-# ── API Keys ───────────────────────────────────────────────────────────────────
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")   # Get free key at aistudio.google.com
-ELEVENLABS_API_KEY = "sk_08efe8dccd60244bbf6c9e69ff1f9eb72d91308f7f758a1c"   # Reserved for TTS features later
+# ── NVIDIA NIM (free tier) ─────────────────────────────────────────────────────
+# Get a free key at https://build.nvidia.com (Settings → API Keys), then set it as
+# NVIDIA_API_KEY in your Vercel project's Environment Variables (and a local .env).
+NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY")
+NVIDIA_MODEL = os.environ.get("NVIDIA_MODEL", "nvidia/nemotron-3-super-120b-a12b")
+NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 # ──────────────────────────────────────────────────────────────────────────────
 
 SYSTEM_GUARDRAIL = """
@@ -25,19 +29,42 @@ Respond ONLY with a valid JSON object matching this structure:
 }
 """
 
+REQUIRED_KEYS = ("textual_focus", "thinking_framework", "offline_exercise")
+
+
 class WorkspaceFile(BaseModel):
     id: str
     filename: str
     text: str
     enabled: bool
 
+
 class SocraticRequest(BaseModel):
     student_query: str
     workspace_files: List[WorkspaceFile]
 
 
+def extract_json(raw: str) -> dict:
+    """Pull the JSON object out of a model reply (handles <think> blocks and code fences)."""
+    cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start == -1 or end <= start:
+        raise ValueError("Model did not return a JSON object.")
+    data = json.loads(cleaned[start : end + 1])
+    missing = [k for k in REQUIRED_KEYS if not isinstance(data.get(k), str)]
+    if missing:
+        raise ValueError(f"Model reply is missing fields: {', '.join(missing)}")
+    return {k: data[k] for k in REQUIRED_KEYS}
+
+
 @app.post("/api/scaffold")
 async def generate_scaffold(req: SocraticRequest):
+    if not NVIDIA_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="NVIDIA_API_KEY is not set. Add it in your Vercel project's Environment Variables.",
+        )
+
     active_files = [f for f in req.workspace_files if f.enabled]
     active_files.sort(key=lambda x: x.id)
 
@@ -47,18 +74,36 @@ async def generate_scaffold(req: SocraticRequest):
 
     user_payload = f"[CONTEXT FILE ATTACHMENTS]:\n{document_text}\n\n[STUDENT QUERY]: {req.student_query}"
 
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel(
-            model_name="gemini-3.8-flash",
-            system_instruction=SYSTEM_GUARDRAIL,
-            generation_config=genai.GenerationConfig(
-                response_mime_type="application/json",
-                temperature=0.2,
-            ),
-        )
-        response = model.generate_content(user_payload)
-        return json.loads(response.text)
+    body = {
+        "model": NVIDIA_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_GUARDRAIL},
+            {"role": "user", "content": user_payload},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 1024,
+        "stream": False,
+    }
+    headers = {
+        "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Accept": "application/json",
+    }
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    try:
+        async with httpx.AsyncClient(timeout=55) as client:
+            resp = await client.post(NVIDIA_URL, json=body, headers=headers)
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="The model took too long to respond. Try again.")
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"Could not reach NVIDIA API: {e}")
+
+    if resp.status_code == 429:
+        raise HTTPException(status_code=429, detail="NVIDIA free-tier rate limit hit. Wait a moment and retry.")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"NVIDIA API error {resp.status_code}: {resp.text[:300]}")
+
+    try:
+        content = resp.json()["choices"][0]["message"]["content"] or ""
+        return extract_json(content)
+    except (KeyError, IndexError, ValueError) as e:
+        raise HTTPException(status_code=502, detail=f"Unexpected model response: {e}")
