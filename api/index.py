@@ -17,9 +17,9 @@ NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY")
 # Models are tried in order. A model your account isn't entitled to (404/403) is skipped.
 # Override with NVIDIA_MODEL in Vercel: one id, or several separated by commas.
 DEFAULT_MODELS = [
-    "nvidia/nemotron-3-super-120b-a12b",
     "nvidia/nemotron-3.5-lightning-30b-a3b",
     "nvidia/nemotron-nano-3-30b-a3b",
+    "nvidia/nemotron-3-super-120b-a12b",
     "nvidia/llama-3.1-nemotron-70b-instruct",
     "nvidia/llama-3.1-nemotron-ultra-253b-v1",
 ]
@@ -111,9 +111,13 @@ async def generate_scaffold(req: SocraticRequest):
                 "model": model,
                 "messages": messages,
                 "temperature": 0.2,
-                "max_tokens": 2048,
+                "max_tokens": 3072,
                 "stream": False,
             }
+            if "nemotron-3" in model or "nemotron-nano-3" in model:
+                # Nemotron 3 family are reasoning models: without this they can spend the
+                # whole token budget "thinking" and return no answer.
+                body["chat_template_kwargs"] = {"enable_thinking": False}
             try:
                 resp = await client.post(NVIDIA_URL, json=body, headers=headers, timeout=remaining)
             except httpx.TimeoutException:
