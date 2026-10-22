@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 from typing import List
 
 import httpx
@@ -57,14 +58,18 @@ class SocraticRequest(BaseModel):
 
 def extract_json(raw: str) -> dict:
     """Pull the JSON object out of a model reply (handles <think> blocks and code fences)."""
-    cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+    cleaned = re.sub(r"^.*?</think>", "", cleaned, flags=re.DOTALL).strip()
     start, end = cleaned.find("{"), cleaned.rfind("}")
     if start == -1 or end <= start:
-        raise ValueError("Model did not return a JSON object.")
-    data = json.loads(cleaned[start : end + 1])
+        raise ValueError("no JSON object in reply")
+    try:
+        data = json.loads(cleaned[start : end + 1])
+    except json.JSONDecodeError:
+        raise ValueError("reply contained invalid JSON")
     missing = [k for k in REQUIRED_KEYS if not isinstance(data.get(k), str)]
     if missing:
-        raise ValueError(f"Model reply is missing fields: {', '.join(missing)}")
+        raise ValueError(f"reply is missing fields: {', '.join(missing)}")
     return {k: data[k] for k in REQUIRED_KEYS}
 
 
@@ -94,42 +99,46 @@ async def generate_scaffold(req: SocraticRequest):
         "Accept": "application/json",
     }
 
-    skipped = []  # models this account can't use (404/403)
-    try:
-        async with httpx.AsyncClient(timeout=50) as client:
-            for model in NVIDIA_MODELS:
-                body = {
-                    "model": model,
-                    "messages": messages,
-                    "temperature": 0.2,
-                    "max_tokens": 1024,
-                    "stream": False,
-                }
-                resp = await client.post(NVIDIA_URL, json=body, headers=headers)
-                if resp.status_code in (403, 404):
-                    skipped.append(f"{model} ({resp.status_code})")
-                    continue
+    notes = []  # why each model that was tried didn't produce an answer
+    deadline = time.monotonic() + 52  # stay inside the 60s function limit
+    async with httpx.AsyncClient() as client:
+        for model in NVIDIA_MODELS:
+            remaining = deadline - time.monotonic()
+            if remaining < 5:
+                notes.append(f"{model}: skipped, out of time")
                 break
-            else:
-                raise HTTPException(
-                    status_code=502,
-                    detail="None of the configured NVIDIA models are available to this API key: "
-                    + ", ".join(skipped)
-                    + ". Open a model's page on build.nvidia.com and click 'Try API', "
-                    "or set NVIDIA_MODEL in Vercel to a model that works for you.",
-                )
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="The model took too long to respond. Try again.")
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=502, detail=f"Could not reach NVIDIA API: {e}")
+            body = {
+                "model": model,
+                "messages": messages,
+                "temperature": 0.2,
+                "max_tokens": 2048,
+                "stream": False,
+            }
+            try:
+                resp = await client.post(NVIDIA_URL, json=body, headers=headers, timeout=remaining)
+            except httpx.TimeoutException:
+                notes.append(f"{model}: timed out")
+                break
+            except httpx.HTTPError as e:
+                raise HTTPException(status_code=502, detail=f"Could not reach NVIDIA API: {e}")
 
-    if resp.status_code == 429:
-        raise HTTPException(status_code=429, detail="NVIDIA free-tier rate limit hit. Wait a moment and retry.")
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"NVIDIA API error {resp.status_code}: {resp.text[:300]}")
+            if resp.status_code == 429:
+                raise HTTPException(status_code=429, detail="NVIDIA free-tier rate limit hit. Wait a moment and retry.")
+            if resp.status_code != 200:
+                notes.append(f"{model}: HTTP {resp.status_code}")
+                continue
 
-    try:
-        content = resp.json()["choices"][0]["message"]["content"] or ""
-        return extract_json(content)
-    except (KeyError, IndexError, ValueError) as e:
-        raise HTTPException(status_code=502, detail=f"Unexpected model response: {e}")
+            choice = {}
+            try:
+                choice = resp.json()["choices"][0]
+                return extract_json(choice["message"].get("content") or "")
+            except (KeyError, IndexError, ValueError, TypeError, AttributeError) as e:
+                notes.append(f"{model}: {e} (finish_reason={choice.get('finish_reason', '?')})")
+                continue
+
+    raise HTTPException(
+        status_code=502,
+        detail="No NVIDIA model produced a usable answer. " + "; ".join(notes)
+        + ". 404/403 means your key can't use that model (open it on build.nvidia.com and click 'Try API'); "
+        "you can also set NVIDIA_MODEL in Vercel to the model you want.",
+    )
