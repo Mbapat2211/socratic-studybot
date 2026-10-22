@@ -13,7 +13,18 @@ app = FastAPI()
 # Get a free key at https://build.nvidia.com (Settings → API Keys), then set it as
 # NVIDIA_API_KEY in your Vercel project's Environment Variables (and a local .env).
 NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY")
-NVIDIA_MODEL = os.environ.get("NVIDIA_MODEL", "nvidia/nemotron-3-super-120b-a12b")
+# Models are tried in order. A model your account isn't entitled to (404/403) is skipped.
+# Override with NVIDIA_MODEL in Vercel: one id, or several separated by commas.
+DEFAULT_MODELS = [
+    "nvidia/nemotron-3-super-120b-a12b",
+    "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "nvidia/nemotron-nano-3-30b-a3b",
+    "nvidia/llama-3.1-nemotron-70b-instruct",
+    "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+]
+NVIDIA_MODELS = [
+    m.strip() for m in os.environ.get("NVIDIA_MODEL", "").split(",") if m.strip()
+] or DEFAULT_MODELS
 NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -74,24 +85,39 @@ async def generate_scaffold(req: SocraticRequest):
 
     user_payload = f"[CONTEXT FILE ATTACHMENTS]:\n{document_text}\n\n[STUDENT QUERY]: {req.student_query}"
 
-    body = {
-        "model": NVIDIA_MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_GUARDRAIL},
-            {"role": "user", "content": user_payload},
-        ],
-        "temperature": 0.2,
-        "max_tokens": 1024,
-        "stream": False,
-    }
+    messages = [
+        {"role": "system", "content": SYSTEM_GUARDRAIL},
+        {"role": "user", "content": user_payload},
+    ]
     headers = {
         "Authorization": f"Bearer {NVIDIA_API_KEY}",
         "Accept": "application/json",
     }
 
+    skipped = []  # models this account can't use (404/403)
     try:
-        async with httpx.AsyncClient(timeout=55) as client:
-            resp = await client.post(NVIDIA_URL, json=body, headers=headers)
+        async with httpx.AsyncClient(timeout=50) as client:
+            for model in NVIDIA_MODELS:
+                body = {
+                    "model": model,
+                    "messages": messages,
+                    "temperature": 0.2,
+                    "max_tokens": 1024,
+                    "stream": False,
+                }
+                resp = await client.post(NVIDIA_URL, json=body, headers=headers)
+                if resp.status_code in (403, 404):
+                    skipped.append(f"{model} ({resp.status_code})")
+                    continue
+                break
+            else:
+                raise HTTPException(
+                    status_code=502,
+                    detail="None of the configured NVIDIA models are available to this API key: "
+                    + ", ".join(skipped)
+                    + ". Open a model's page on build.nvidia.com and click 'Try API', "
+                    "or set NVIDIA_MODEL in Vercel to a model that works for you.",
+                )
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="The model took too long to respond. Try again.")
     except httpx.HTTPError as e:
