@@ -7,3 +7,6 @@ __pycache__
 .venv
 venv
 tsconfig.tsbuildinfo
+next-env.d.ts
+.env*.local
+.vercel
